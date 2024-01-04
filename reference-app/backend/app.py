@@ -1,10 +1,16 @@
+import time
 from flask import Flask, render_template, request, Response, jsonify
 from prometheus_flask_exporter import PrometheusMetrics
+from jaeger_client import Config
 
 # import pymongo
 # from flask_pymongo import PyMongo
 
 app = Flask(__name__)
+
+###################################################################
+## Prmetheus
+###################################################################
 # Usage out of https://pypi.org/project/prometheus-flask-exporter
 metrics = PrometheusMetrics(app)
 
@@ -21,7 +27,17 @@ by_status_counter = metrics.counter(
     'by_status_counter', 'Request count by http status', 
     labels={'status': lambda: Response.status_code})
 
-
+###################################################################
+## Jaeger
+###################################################################
+def init_tracer(service):    
+    config = Config(
+        config={"sampler": {"type": "const", "param": 1,}, "logging": True,},
+        service_name=service,
+    )
+    # this call also sets opentracing.tracer
+    return config.initialize_tracer()
+tracer = init_tracer("backend")
 
 # As stated in https://knowledge.udacity.com/questions/735508
 # To keep things simple we will generate errors using dedicated endpoints and skip setup of a mongoDB
@@ -38,7 +54,8 @@ by_status_counter = metrics.counter(
 @by_method_counter
 @by_status_counter
 def homepage():
-    return "Hello World"
+    with tracer.start_span("Root") as root_span:        
+        return "Hello World"
 
 
 @app.route("/api")
@@ -46,8 +63,10 @@ def homepage():
 @by_method_counter
 @by_status_counter
 def my_api():
-    answer = "something"
-    return jsonify(repsonse=answer)
+    with tracer.start_span("Api") as api_span:
+        answer = "something"
+        time.sleep(10)
+        return jsonify(repsonse=answer)
 
 # https://knowledge.udacity.com/questions/735508
 # @app.route("/star", methods=["POST"])
